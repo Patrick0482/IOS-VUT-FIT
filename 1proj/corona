@@ -1,0 +1,491 @@
+#!/usr/bin/env bash
+
+export POSIXLY_CORRECT=yes
+export LC_NUMERIC=en_US.UTF-8
+
+#######################/ FUNCTIONS /#######################
+
+none_sort() {                           #zabezpeci aby "none: " bol stale na konci
+    awk \
+        '{
+            if ($0 ~ /^None.*/)
+            {
+                none_line=$0
+            }
+            else
+            {
+                print $0
+            }        
+        } 
+        
+        END{
+            if (none_line != "")
+                print none_line
+        }'
+}
+
+print_help()                        #vypise napovedu
+{
+    echo "Usage: corona [-h | --help]"
+    echo "       corona [FILTER...] [COMMAND] [LOG [LOG2 [...]]"
+    echo ""
+    echo "COMMANDS:"
+    echo ""
+    echo "  infected       -spočíta počet nakazených"
+    echo "  merge          -zlúči niekoľko súborov so záznamami do jedného"
+    echo "  gender         -vypíše počet nakazených pre jednotlivé pohlavie"
+    echo "  age            -vypíše štatistiku počtu nakazených osôb podľa veku"
+    echo "  daily          -vypíše štatistiku nakazených osôb pre jednotlivé dni"
+    echo "  monthly        -vypíše štatistiku nakazených osôb pre jednotlivé mesiace"
+    echo "  yearly         -vypíše štatistiku nakazených osôb pre jednotlivé roky"
+    echo "  countries      -vypíše štatistiku nakazených osôb pre jednotlivé krajiny nákazy (bez ČR, tj. kódu CZ)"
+    echo "  districts      -vypíše štatistiku nakazených osôb pre jednotlivé okresy"
+    echo "  regions        -vypíše štatistiku nakazených osôb pre jednotlivé kraje"
+    echo ""
+    echo "FILTERS:"
+    echo ""
+    echo "  -a DATETIME     -after: sú uvažované len záznamy PO tomto dátume (vrátane) FORMAT: YYYY-MM-DD"
+    echo "  -b DATETIME     -before: sú uvažované len záznamy PRED týmto dátumom (vrátane)"
+    echo "  -g GENDER       -sú uvažované len záznamy nakazených osôb daného pohlavia. GENDER: M(muži) Z(ženy)"
+    echo "  -s WIDTH        -u príkazov: gender, age, daily, monthly, yearly, countries, districts, regions" 
+    echo "                  -vypisuje dáta nie číselne, ale graficky v podobe histogramov."
+    echo "                  -WIDTH - šírka histogramov (nepovinné)"
+    echo "  -h              4-vypíše nápovedu"
+}
+
+date_check() {            #kontrola spravnosti datumu
+    if [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && [ -n "$(date -d "$1" 2>/dev/null)" ]; 
+    then
+        return 0
+    else
+        return 1
+    fi
+}
+
+print_error() {           #vypisovanie erroru
+    if [ "$1" == "" ]; 
+    then
+        echo "./corona: $2" 1>&2
+    else
+        echo "./corona: $1: $2" 1>&2
+    fi
+    exit "$3"
+}
+
+#######################/ MAIN AWK /#######################
+
+main_awk(){
+    awk -F ',' -v date_po="$DATE_1" -v date_pred="$DATE_2" -v gender="$GENDER" -v width="$WIDTH" -v command="$COMMAND" -v header="$HEADER" -v s_filter="$S_FILTER" \
+'
+    function array_print(array, default_hist)               #funkcia na vypisovanie poli
+    {
+        if (width != "")
+        {                                                     
+            max_val = 0
+            for (i in array) 
+            { 
+                if (array[i] > max_val)
+                { 
+                    max_val = array[i]
+                }
+            }          
+            default_hist = max_val / width
+        }
+
+        for (i in array)
+        {
+            if (s_filter)
+            {
+                histogr = ""
+                hashtag_line = 0
+
+                if (array[i]/default_hist - int(array[i]/default_hist) > 0.99) {
+                    hashtag_line = array[i]/default_hist
+                } else {
+                    hashtag_line = int(array[i]/default_hist)
+                }
+
+                for (j = 0; j < hashtag_line; j++)          #na zistenie poctu "#" a nahradenie cisel nimi
+                {               
+                    histogr = histogr"#"
+                }
+                array[i] = histogr                                             
+            }
+
+            if ( i == "" )
+            {
+                print "None: ", array[""]               
+            } 
+            else
+            {
+                print i, ": ", array[i] | "sort"  
+            }
+        } 
+    }
+
+    function print_age(array, default_hist) {
+        if (width != "")
+        {                                                     
+            max_val = 0
+            for (i in array) 
+            { 
+                if (array[i] > max_val)
+                { 
+                    max_val = array[i]
+                }
+            }          
+            default_hist = max_val / width
+        }
+
+        for (i in array) {
+            if (s_filter)
+            {
+                histogr = ""
+                hashtag_line = 0
+
+                if (array[i]/default_hist - int(array[i]/default_hist) > 0.99) {            #kvoli zaokruhlovaniu, malo by to byt trocha presnejsie
+                    hashtag_line = array[i]/default_hist
+                } else {
+                    hashtag_line = int(array[i]/default_hist)
+                }
+
+                for (j = 0; j < hashtag_line; j++) 
+                {               
+                    histogr = histogr"#"
+                }
+                array[i] = histogr                                             
+            }
+        }
+        #vypisanie vsetkych moznosti veku
+        print "0-5   :  ", array_age["0-5"];
+        print "6-15  :  ", array_age["6-15"];
+        print "16-25 :  ", array_age["16-25"];
+        print "26-35 :  ", array_age["26-35"];
+        print "36-45 :  ", array_age["36-45"];
+        print "46-55 :  ", array_age["46-55"];
+        print "56-65 :  ", array_age["56-65"];
+        print "66-75 :  ", array_age["66-75"];
+        print "76-85 :  ", array_age["76-85"];
+        print "86-95 :  ", array_age["86-95"];
+        print "96-105:  ", array_age["96-105"];
+        print ">105  :  ", array_age[">105"];
+        if (array_age[""]!=0)
+            print "None  : ", array_age[""]
+    }
+
+    function alright_filters()              #kontorlovanie filtrov
+    {
+        if ($0 ~ /^[[:space:]]*$/ || $0 == header)
+        {
+            return 0
+        } 
+        #kontrola datumu
+        else if (date_rozdel[2]>12 || date_rozdel[3]>31 || (date_rozdel[3]>30 && (date_rozdel[2]==04 || date_rozdel[2]==06 || date_rozdel[2]==09 || date_rozdel[2]==11)) || (date_rozdel[3]>29 && date_rozdel[2]==02))
+        {
+            print "Date is INVALID: " $0 | "cat 1>&2"
+                return 0
+        } 
+        #kontrola veku
+        else if (!($3 ~ /^[0-9]{1,3}$/) && $3!="") 
+        {                          
+            print "Age is INVALID: " $0 | "cat 1>&2"
+            return 0
+        }
+        
+        else if ((date_po>$2 || $2>date_pred) || (gender!=$4 && gender!=""))    # -a -b -g filter
+        {       
+            return 0
+        }
+            
+        return 1        
+    }
+
+
+    BEGIN{
+        array_infected = 0
+
+        ######################
+
+        array_gender["M"] = 0
+        array_gender["Z"] = 0
+
+        ######################
+        
+        array_age["0-5"] = 0 
+        array_age["6-15"] = 0
+        array_age["16-25"] = 0
+        array_age["26-35"] = 0
+        array_age["36-45"] = 0
+        array_age["46-55"] = 0
+        array_age["56-65"] = 0
+        array_age["66-75"] = 0
+        array_age["76-85"] = 0
+        array_age["86-95"] = 0
+        array_age["96-105"] = 0
+        array_age[">105"] = 0
+
+        #######################
+    }
+
+    {
+        gsub(" ", "", $0)         #odstrani medzery                             
+
+        split($2,date_rozdel,"-")    #rozdeli datum na 3 casti (1 year /2 month /3 day)                             
+
+        if (alright_filters())
+        {
+            if (command == "merge" || command == "")
+            {          
+                print $0
+            }
+
+            else            #pripocitavanie do poli
+            {
+                ###########INFECTED###########
+                array_infected++
+                
+                ###########GENDER###########
+                array_gender[$4]++
+
+                ###########DATE###########
+                array_daily[$2]++
+                array_monthly[substr($2, 1, 7)]++                                       
+                array_yearly[substr($2, 1, 4)]++                                        
+                
+                ###########COUNTRY###########
+                if ($8 != "" && $8 != "CZ")                                                             
+                {
+                    array_countries[$8]++
+                }
+                array_districts[$6]++
+                array_regions[$5]++
+                
+                ###########AGE###########
+                if (command == "age") 
+                {
+                    if ($3 == "")
+                        { array_age[""]++ }
+                    else if ($3 <= 5) 
+                        { array_age["0-5"]++ }
+                    else if ($3 <= 15) 
+                        { array_age["6-15"]++ }
+                    else if ($3 <= 25) 
+                        { array_age["16-25"]++ }
+                    else if ($3 <= 35) 
+                        { array_age["26-35"]++ }
+                    else if ($3 <= 45) 
+                        { array_age["36-45"]++ }
+                    else if ($3 <= 55) 
+                        { array_age["46-55"]++ }
+                    else if ($3 <= 65) 
+                        { array_age["56-65"]++ }
+                    else if ($3 <= 75) 
+                        { array_age["66-75"]++ }
+                    else if ($3 <= 85) 
+                        { array_age["76-85"]++ }
+                    else if ($3 <= 95) 
+                        { array_age["86-95"]++ }
+                    else if ($3 <= 105) 
+                        { array_age["96-105"]++ }
+                    else 
+                        { array_age[">105"]++ }
+                }
+            }
+        }
+    }
+            #vypisovanie poli + print_age()
+        END{
+            if (command == "infected") 
+            {
+                print array_infected
+            } 
+            
+            else if (command == "gender") 
+            {
+                array_print(array_gender, 100000)
+            } 
+            
+            else if (command == "age") 
+            {
+                print_age(array_age, 10000)                          
+            } 
+            
+            else if (command == "daily") 
+            {
+                array_print(array_daily, 500)
+            } 
+            
+            else if (command == "monthly") 
+            {
+                array_print(array_monthly, 10000)
+            } 
+            
+            else if (command == "yearly") 
+            {
+                array_print(array_yearly, 100000)
+            }
+            
+            else if (command == "countries") 
+            {
+                array_print(array_countries, 100)
+            } 
+            
+            else if (command == "districts") 
+            {
+                array_print(array_districts, 1000)
+            } 
+            
+            else if (command == "regions") 
+            {
+                array_print(array_regions, 10000)
+            }
+        }
+'
+}
+
+COMMAND=""
+
+S_FILTER=0
+
+#parametre filtrov
+DATE_1=""
+DATE_2="42069-01-01"
+GENDER=""
+WIDTH=""
+DISTRICT_FILE=""
+REGIONS_FILE=""
+
+HEADER="id,datum,vek,pohlavi,kraj_nuts_kod,okres_lau_kod,nakaza_v_zahranici,nakaza_zeme_csu_kod,reportovano_khs"
+FILE_NAMES="" # mena suborov vuzivam pri gzip a bzip na konci
+
+# exit codes
+DONE="0"
+MULTIPLE_ARG="1"
+UNKNOWN_FILTER="2"
+WRONG_FILT_ARG="3"
+
+while [ "$#" -gt 0 ]; do                                                                                    
+    case "$1" in
+        infected | merge | gender | age | daily | monthly | yearly | countries | districts | regions)
+            if [ -n "$COMMAND" ]; 
+                then error_msg "" "Multiple arguments found" "$MULTIPLE_ARG"; 
+            fi
+            COMMAND=$1
+            ;;
+        -a)
+            if [ "$#" -lt 2 ]; 
+                then error_msg "" "Filter argument is missing" "$WRONG_FILT_ARG"; 
+            fi
+
+            if ! check_date "$2"; 
+                then error_msg "$2" "Date is INVALID" "$WRONG_FILT_ARG"; 
+            fi
+            DATE_1=$2
+            shift                                                                                           
+            ;;
+        -b)
+            if [ "$#" -lt 2 ]; 
+                then error_msg "" "Filter argument is missing" "$WRONG_FILT_ARG"; 
+            fi
+
+            if ! check_date "$2"; 
+                then error_msg "$2" "Date is INVALID" "$WRONG_FILT_ARG"; 
+            fi
+            DATE_2=$2
+            shift
+            ;;
+        -g)
+            if [ "$#" -lt 2 ]; 
+                then error_msg "" "Filter argument missing" "$WRONG_FILT_ARG"; 
+            fi
+
+            if [ "$2" != "M" ] && [ "$2" != "Z" ]; 
+                then error_msg "$2" "Gender is unknown" "$WRONG_FILT_ARG"; 
+            fi
+            GENDER=$2
+            shift
+            ;;
+        -s)
+            S_FILTER=1
+            if [ "$#" -ge 2 ]; 
+                then
+                    if [[ "$2" =~ ^-[0-9]+$ ]] || [[ "$2" =~ ^-?[0-9]*[.,][0-9]*$ ]] || [ "$2" == "0" ]; 
+                        then error_msg "" "Width must be a positive integer" "$WRONG_FILT_ARG"; 
+                    fi
+                    
+                    if [[ "$2" =~ ^[0-9]+$ ]]; 
+                        then
+                            WIDTH=$2
+                            shift
+                    fi
+            fi
+            ;;
+        -d)
+            if [ "$#" -lt 2 ]; 
+                then error_msg "" "Filter argument is missing" "$WRONG_FILT_ARG"; 
+            fi
+            DISTRICT_FILE=$2
+            shift
+            ;;
+        -r)
+            if [ "$#" -lt 2 ]; 
+                then error_msg "" "Filter argument is missing" "$WRONG_FILT_ARG"; 
+            fi
+            REGIONS_FILE=$2
+            shift
+            ;;
+        -h)
+            help
+            exit "$DONE"
+            ;;
+        *)
+            if [[ $1 =~ ^-.+$ ]]; 
+                then error_msg "$1" "Filter is unknown" "$UNKNOWN_FILTER"; 
+            fi
+            FILE_NAMES="$FILE_NAMES $1"
+            ;;
+    esac
+    shift                                                                                   
+done
+
+if [ -z "$COMMAND" ] || [ "$COMMAND" == "merge" ]; then                     
+    echo "$HEADER"                                                          
+    if [ -z "$FILE_NAMES" ];            #ak je prazdny subor nacitaj stdin
+    then                                                 
+        cat | tail -n +2 | main_awk                                     
+    else
+        for file in $FILE_NAMES; do                                               
+            case $file in
+            *.gz)
+                gzip -d -c $file | tail -n +2 | main_awk | none_sort               #tail -n +2 nas zbavi hlavicky tu nepotrebujeme pri pricitavani statistik
+                ;;
+            *.bz2)
+                bzip2 -d -c $file | tail -n +2 | main_awk | none_sort
+                ;;
+            *)
+                cat $file | tail -n +2 | main_awk | none_sort
+                ;;
+            esac
+        done
+    fi
+else
+    if [ -z "$FILE_NAMES" ];            #ak je prazdny subor nacitaj stdin
+    then                                                 
+        cat | tail -n +2 | main_awk | none_sort
+    else
+        case "$FILE_NAMES" in
+        *.gz)
+            gzip -d -c $FILE_NAMES | tail -n +2 | main_awk | none_sort
+            ;;
+        *.bz2)
+            bzip2 -d -c $FILE_NAMES | tail -n +2 | main_awk | none_sort
+            ;;
+        *)
+            cat $FILE_NAMES | tail -n +2 | main_awk | none_sort
+            ;;
+        esac
+    fi
+fi
+
+
+exit "$DONE"
